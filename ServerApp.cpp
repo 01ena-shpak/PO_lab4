@@ -83,11 +83,15 @@ int main()
 
     if (bind(server_socket, (sockaddr*)&local_addr, sizeof(local_addr))) {
         std::cout << "Bind error\n";
+        closesocket(server_socket);
+        WSACleanup();
         return -1;
     }
 
     if (listen(server_socket, 5)) {
         std::cout << "Listen error\n";
+        closesocket(server_socket);
+        WSACleanup();
         return -1;
     }
 
@@ -129,6 +133,15 @@ int main()
 
         int response = RESP_OK;
         send(client_socket, (char*)&response, sizeof(response), 0);
+
+        // надсилаємо результат назад клієнту
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                send(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+            }
+        }
+
+        std::cout << "\nResult matrix sent to client\n";
     }
 
     closesocket(client_socket);
