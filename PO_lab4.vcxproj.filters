@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="PO_lab4.cpp">
+    <ClCompile Include="ServerApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
