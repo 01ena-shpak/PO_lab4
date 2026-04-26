@@ -5,12 +5,12 @@ VisualStudioVersion = 17.11.35312.102
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ServerApp", "PO_lab4.vcxproj", "{7A7F01FA-23CC-45B4-AAB0-342C034C4FEE}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ClientApp", "..\ClientApp\ClientApp.vcxproj", "{7C7433C0-9EC7-4CAA-B224-F02FD567C1DF}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Common", "Common", "{F4C8E488-A50C-4CC1-862B-2D6E01FAC176}"
 	ProjectSection(SolutionItems) = preProject
 		protocol.h = protocol.h
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ClientApp", "..\ClientApp\ClientApp.vcxproj", "{7C7433C0-9EC7-4CAA-B224-F02FD567C1DF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
