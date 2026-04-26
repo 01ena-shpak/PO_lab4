@@ -70,8 +70,16 @@ int main()
     else {
         std::cout << "Received command: " << command << "\n";
 
-        if (command == CMD_START) {
-            std::cout << "Command is CMD_START\n";
+        if (command == CMD_SEND_DATA) {
+            int n;
+            int threadCount;
+
+            recv(client_socket, (char*)&n, sizeof(n), 0);
+            recv(client_socket, (char*)&threadCount, sizeof(threadCount), 0);
+
+            std::cout << "Command is CMD_SEND_DATA\n";
+            std::cout << "Matrix size N = " << n << "\n";
+            std::cout << "Thread count = " << threadCount << "\n";
 
             int response = RESP_OK;
             send(client_socket, (char*)&response, sizeof(response), 0);
