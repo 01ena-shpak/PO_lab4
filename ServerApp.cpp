@@ -103,45 +103,108 @@ int main()
 
     SOCKET client_socket = accept(server_socket, (sockaddr*)&client_addr, &client_addr_size);
 
+    if (client_socket == INVALID_SOCKET) {
+        std::cout << "Accept error\n";
+        closesocket(server_socket);
+        WSACleanup();
+        return -1;
+    }
+
     std::cout << "Client connected\n";
 
-    int command;
-    recv(client_socket, (char*)&command, sizeof(command), 0);
+    std::vector<std::vector<int>> matrix;
+    int n = 0;
+    int threadCount = 1;
+    bool hasData = false;
+    bool isDone = false;
 
-    if (command == CMD_SEND_DATA)
+    while (true)
     {
-        int n, threadCount;
+        int command;
+        int bytes_recv = recv(client_socket, (char*)&command, sizeof(command), 0);
 
-        recv(client_socket, (char*)&n, sizeof(n), 0);
-        recv(client_socket, (char*)&threadCount, sizeof(threadCount), 0);
-
-        std::vector<std::vector<int>> matrix(n, std::vector<int>(n));
-
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                recv(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
-            }
+        if (bytes_recv <= 0) {
+            std::cout << "Client disconnected\n";
+            break;
         }
 
-        std::cout << "\nMatrix BEFORE:\n";
-        PrintMatrix(matrix);
+        if (command == CMD_SEND_DATA)
+        {
+            recv(client_socket, (char*)&n, sizeof(n), 0);
+            recv(client_socket, (char*)&threadCount, sizeof(threadCount), 0);
 
-        MirrorRightToLeftParallel(matrix, threadCount);
+            matrix = std::vector<std::vector<int>>(n, std::vector<int>(n));
 
-        std::cout << "\nMatrix AFTER:\n";
-        PrintMatrix(matrix);
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    recv(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+                }
+            }
 
-        int response = RESP_OK;
-        send(client_socket, (char*)&response, sizeof(response), 0);
+            hasData = true;
+            isDone = false;
 
-        // надсилаємо результат назад клієнту
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                send(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+            std::cout << "\nCMD_SEND_DATA received\n";
+            std::cout << "Matrix size N = " << n << "\n";
+            std::cout << "Thread count = " << threadCount << "\n";
+
+            std::cout << "\nMatrix received:\n";
+            PrintMatrix(matrix);
+
+            int response = RESP_OK;
+            send(client_socket, (char*)&response, sizeof(response), 0);
+        }
+        else if (command == CMD_START)
+        {
+            if (!hasData) {
+                int response = RESP_NO_DATA;
+                send(client_socket, (char*)&response, sizeof(response), 0);
+            }
+            else {
+                std::cout << "\nCMD_START received\n";
+
+                std::cout << "\nMatrix BEFORE:\n";
+                PrintMatrix(matrix);
+
+                MirrorRightToLeftParallel(matrix, threadCount);
+
+                std::cout << "\nMatrix AFTER:\n";
+                PrintMatrix(matrix);
+
+                isDone = true;
+
+                int response = RESP_DONE;
+                send(client_socket, (char*)&response, sizeof(response), 0);
             }
         }
+        else if (command == CMD_GET_RESULT)
+        {
+            if (!isDone) {
+                int response = RESP_IN_PROGRESS;
+                send(client_socket, (char*)&response, sizeof(response), 0);
+            }
+            else {
+                int response = RESP_OK;
+                send(client_socket, (char*)&response, sizeof(response), 0);
 
-        std::cout << "\nResult matrix sent to client\n";
+                for (int i = 0; i < n; i++) {
+                    for (int j = 0; j < n; j++) {
+                        send(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+                    }
+                }
+
+                std::cout << "\nResult matrix sent to client\n";
+            }
+        }
+        else if (command == CMD_DISCONNECT)
+        {
+            std::cout << "CMD_DISCONNECT received\n";
+            break;
+        }
+        else {
+            int response = RESP_ERROR;
+            send(client_socket, (char*)&response, sizeof(response), 0);
+        }
     }
 
     closesocket(client_socket);
