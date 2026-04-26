@@ -122,7 +122,6 @@ int main()
         std::cout << "\nMatrix BEFORE:\n";
         PrintMatrix(matrix);
 
-        // 🔥 твій алгоритм
         MirrorRightToLeftParallel(matrix, threadCount);
 
         std::cout << "\nMatrix AFTER:\n";
