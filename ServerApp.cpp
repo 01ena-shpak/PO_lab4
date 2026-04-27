@@ -4,17 +4,49 @@
 #include <winsock2.h>
 #include <vector>
 #include <thread>
+#include <mutex>
 
-void PrintMatrix(const std::vector<std::vector<int>>& matrix)
+std::mutex coutMutex;
+int nextClientId = 1;
+std::mutex clientIdMutex;
+
+void PrintMatrixSafe(int clientId, const std::vector<std::vector<int>>& matrix)
 {
+    std::lock_guard<std::mutex> lock(coutMutex);
+
     int n = (int)matrix.size();
 
+    std::cout << "\n[Client " << clientId << "] Matrix:\n";
+
     for (int i = 0; i < n; i++) {
+        std::cout << "[Client " << clientId << "] ";
         for (int j = 0; j < n; j++) {
             std::cout << matrix[i][j] << " ";
         }
         std::cout << "\n";
     }
+}
+
+void PrintSafe(int clientId, const std::string& text)
+{
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << "[Client " << clientId << "] " << text << "\n";
+}
+
+void PrintServerSafe(const std::string& text)
+{
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << text << "\n";
+}
+
+int GetNextClientId()
+{
+    std::lock_guard<std::mutex> lock(clientIdMutex);
+
+    int id = nextClientId;
+    nextClientId++;
+
+    return id;
 }
 
 void MirrorWorker(std::vector<std::vector<int>>& a, int startRow, int endRow)
@@ -57,9 +89,9 @@ void MirrorRightToLeftParallel(std::vector<std::vector<int>>& a, int threadCount
     }
 }
 
-void HandleClient(SOCKET client_socket)
+void HandleClient(SOCKET client_socket, int clientId)
 {
-    std::cout << "\nClient connected in thread\n";
+    PrintSafe(clientId, "connected in thread");
 
     std::vector<std::vector<int>> matrix;
     int n = 0;
@@ -69,139 +101,185 @@ void HandleClient(SOCKET client_socket)
     bool isDone = false;
     bool isRunning = false;
 
+    std::mutex stateMutex;
+    std::thread calculationThread;
+
     while (true)
     {
-        int command;
-        int bytes_recv = recv(client_socket, (char*)&command, sizeof(command), 0);
+        int command = recvInt(client_socket);
 
-        if (bytes_recv <= 0) {
-            std::cout << "Client disconnected unexpectedly\n";
+        if (command == -1) {
+            PrintSafe(clientId, "disconnected unexpectedly");
             break;
         }
 
         if (command == CMD_SEND_DATA)
         {
-            recv(client_socket, (char*)&n, sizeof(n), 0);
-            recv(client_socket, (char*)&threadCount, sizeof(threadCount), 0);
+            n = recvInt(client_socket);
+            threadCount = recvInt(client_socket);
 
             matrix = std::vector<std::vector<int>>(n, std::vector<int>(n));
 
             for (int i = 0; i < n; i++) {
                 for (int j = 0; j < n; j++) {
-                    recv(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+                    matrix[i][j] = recvInt(client_socket);
                 }
             }
 
-            hasData = true;
-            isDone = false;
-            isRunning = false;
+            {
+                std::lock_guard<std::mutex> lock(stateMutex);
+                hasData = true;
+                isDone = false;
+                isRunning = false;
+            }
 
-            std::cout << "\nCMD_SEND_DATA received\n";
-            std::cout << "Matrix size N = " << n << "\n";
-            std::cout << "Thread count = " << threadCount << "\n";
+            {
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "\n[Client " << clientId << "] CMD_SEND_DATA received\n";
+                std::cout << "[Client " << clientId << "] Matrix size N = " << n << "\n";
+                std::cout << "[Client " << clientId << "] Thread count = " << threadCount << "\n";
+            }
 
-            std::cout << "\nMatrix received:\n";
-            PrintMatrix(matrix);
+            PrintMatrixSafe(clientId, matrix);
 
-            int response = RESP_OK;
-            send(client_socket, (char*)&response, sizeof(response), 0);
+            sendInt(client_socket, RESP_OK);
         }
         else if (command == CMD_GET_STATUS)
         {
             int response;
 
-            if (!hasData) {
-                response = RESP_NO_DATA;
-            }
-            else if (isRunning) {
-                response = RESP_IN_PROGRESS;
-            }
-            else if (isDone) {
-                response = RESP_DONE;
-            }
-            else {
-                response = RESP_OK;
+            {
+                std::lock_guard<std::mutex> lock(stateMutex);
+
+                if (!hasData) {
+                    response = RESP_NO_DATA;
+                }
+                else if (isRunning) {
+                    response = RESP_IN_PROGRESS;
+                }
+                else if (isDone) {
+                    response = RESP_DONE;
+                }
+                else {
+                    response = RESP_OK;
+                }
             }
 
-            send(client_socket, (char*)&response, sizeof(response), 0);
+            sendInt(client_socket, response);
 
-            std::cout << "CMD_GET_STATUS received, response = " << response << "\n";
+            {
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "[Client " << clientId << "] CMD_GET_STATUS received, response = " << response << "\n";
+            }
         }
         else if (command == CMD_START)
         {
-            if (!hasData) {
-                int response = RESP_NO_DATA;
-                send(client_socket, (char*)&response, sizeof(response), 0);
+            bool canStart;
+
+            {
+                std::lock_guard<std::mutex> lock(stateMutex);
+                canStart = hasData && !isRunning;
+            }
+
+            if (!canStart) {
+                sendInt(client_socket, RESP_NO_DATA);
             }
             else {
-                std::cout << "\nCMD_START received\n";
+                PrintSafe(clientId, "CMD_START received");
 
-                isRunning = true;
+                {
+                    std::lock_guard<std::mutex> lock(stateMutex);
+                    isRunning = true;
+                    isDone = false;
+                }
 
-                std::cout << "\nMatrix BEFORE:\n";
-                PrintMatrix(matrix);
+                if (calculationThread.joinable()) {
+                    calculationThread.join();
+                }
 
-                MirrorRightToLeftParallel(matrix, threadCount);
+                calculationThread = std::thread([&matrix, threadCount, &isRunning, &isDone, &stateMutex, clientId]() {
+                    WaitByTimer(3);
 
-                std::cout << "\nMatrix AFTER:\n";
-                PrintMatrix(matrix);
+                    MirrorRightToLeftParallel(matrix, threadCount);
 
-                isRunning = false;
-                isDone = true;
+                    PrintMatrixSafe(clientId, matrix);
 
-                int response = RESP_DONE;
-                send(client_socket, (char*)&response, sizeof(response), 0);
+                    {
+                        std::lock_guard<std::mutex> lock(stateMutex);
+                        isRunning = false;
+                        isDone = true;
+                    }
+                    });
+
+                sendInt(client_socket, RESP_OK);
             }
         }
         else if (command == CMD_GET_RESULT)
         {
-            if (!isDone) {
-                int response = RESP_IN_PROGRESS;
-                send(client_socket, (char*)&response, sizeof(response), 0);
+            bool ready;
+
+            {
+                std::lock_guard<std::mutex> lock(stateMutex);
+                ready = isDone;
+            }
+
+            if (!ready) {
+                sendInt(client_socket, RESP_IN_PROGRESS);
             }
             else {
-                int response = RESP_OK;
-                send(client_socket, (char*)&response, sizeof(response), 0);
+                if (calculationThread.joinable()) {
+                    calculationThread.join();
+                }
+
+                sendInt(client_socket, RESP_OK);
 
                 for (int i = 0; i < n; i++) {
                     for (int j = 0; j < n; j++) {
-                        send(client_socket, (char*)&matrix[i][j], sizeof(int), 0);
+                        sendInt(client_socket, matrix[i][j]);
                     }
                 }
 
-                std::cout << "\nResult matrix sent to client\n";
+                PrintSafe(clientId, "result matrix sent to client");
             }
         }
         else if (command == CMD_DISCONNECT)
         {
-            std::cout << "CMD_DISCONNECT received\n";
+            PrintSafe(clientId, "CMD_DISCONNECT received");
             break;
         }
         else {
-            int response = RESP_ERROR;
-            send(client_socket, (char*)&response, sizeof(response), 0);
+            {
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "[Client " << clientId << "] Unknown command: " << command << "\n";
+            }
+
+            sendInt(client_socket, RESP_ERROR);
         }
     }
 
+    if (calculationThread.joinable()) {
+        calculationThread.join();
+    }
+
     closesocket(client_socket);
-    std::cout << "Client thread finished\n";
+    PrintSafe(clientId, "thread finished");
 }
 
 int main()
 {
     char buff[1024];
 
-    std::cout << "TCP SERVER STARTING...\n";
+    PrintServerSafe("TCP SERVER STARTING...");
 
     if (WSAStartup(0x0202, (WSADATA*)&buff[0])) {
-        std::cout << "WSAStartup error\n";
+        PrintServerSafe("WSAStartup error");
         return -1;
     }
 
     SOCKET server_socket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (server_socket == INVALID_SOCKET) {
-        std::cout << "Socket error\n";
+        PrintServerSafe("Socket creation error");
         WSACleanup();
         return -1;
     }
@@ -212,35 +290,34 @@ int main()
     local_addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(server_socket, (sockaddr*)&local_addr, sizeof(local_addr))) {
-        std::cout << "Bind error\n";
+        PrintServerSafe("Bind error");
         closesocket(server_socket);
         WSACleanup();
         return -1;
     }
 
     if (listen(server_socket, 5)) {
-        std::cout << "Listen error\n";
+        PrintServerSafe("Listen error");
         closesocket(server_socket);
         WSACleanup();
         return -1;
     }
 
-    std::cout << "Server started on port " << SERVER_PORT << "\n";
-    std::cout << "Waiting for clients...\n";
+    PrintServerSafe("Server started on port 1111");
+    PrintServerSafe("Waiting for clients...");
 
     while (true)
     {
-        sockaddr_in client_addr;
-        int client_addr_size = sizeof(client_addr);
-
-        SOCKET client_socket = accept(server_socket, (sockaddr*)&client_addr, &client_addr_size);
+        SOCKET client_socket = accept(server_socket, NULL, NULL);
 
         if (client_socket == INVALID_SOCKET) {
-            std::cout << "Accept error\n";
+            PrintServerSafe("Accept error");
             continue;
         }
 
-        std::thread clientThread(HandleClient, client_socket);
+        int clientId = GetNextClientId();
+
+        std::thread clientThread(HandleClient, client_socket, clientId);
         clientThread.detach();
     }
 
